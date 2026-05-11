@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GREEK DAY'S TOPPING</title>
+    <style>
+        body { margin: 0; background: #f0faff; overflow: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        #ui { position: absolute; top: 20px; width: 440px; display: flex; justify-content: space-between; font-size: 22px; font-weight: bold; color: #1a73e8; z-index: 10; pointer-events: none; }
+        canvas { background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.1); border-radius: 25px; cursor: none; }
+        #startBtn { position: absolute; padding: 20px 40px; font-size: 28px; background: #1a73e8; color: white; border: none; border-radius: 50px; cursor: pointer; z-index: 11; font-weight: bold; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        #startBtn:hover { background: #1557b0; transform: scale(1.05); }
+        #resultOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 100; color: white; flex-direction: column; text-align: center; }
+        .result-box { background: white; padding: 40px; border-radius: 30px; color: #333; min-width: 300px; }
+        .retry-btn { margin-top: 20px; padding: 12px 25px; font-size: 18px; background: #1a73e8; color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        @keyframes shake { 0% { transform: translate(3px, 2px); } 50% { transform: translate(-3px, -2px); } 100% { transform: translate(0, 0); } }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="score">Score: 0</div>
+        <div id="lives">Life: 🥣🥣🥣</div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <button id="startBtn">GREEK START!</button>
+    <div id="resultOverlay">
+        <div class="result-box">
+            <h1 style="margin:0; color:#ff4081;">GAME OVER</h1>
+            <p id="finalScoreText" style="font-size:32px; font-weight:bold; margin: 15px 0;"></p>
+            <p id="rankText" style="font-size:20px; color:#555;"></p>
+            <p id="vibeComment" style="font-style:italic; margin-top:10px; color:#1a73e8;"></p>
+            <button class="retry-btn" onclick="location.reload()">다시 꾸덕해지기</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const startBtn = document.getElementById('startBtn');
+    const resultOverlay = document.getElementById('resultOverlay');
+    canvas.width = 480;
+    canvas.height = 720;
+
+    // --- 음악 파일 설정 ---
+    const bgm = new Audio('bgm.mp3'); 
+    bgm.loop = true; // 무한 반복
+
+    const playerImg = new Image();
+    playerImg.src = 'player.png'; 
+
+    let isPlaying = false;
+    let score = 0;
+    let lives = 3;
+    let gameSpeed = 1.0;
+    let frameCount = 0;
+    let superModeTimer = 0;
+    const player = { x: 165, y: 530, baseSize: 150, currentSize: 150 };
+    const items = [];
+    const dynamicTexts = [];
+    const toppings = ['🍓', '🍯', '🥣', '🫐', '🍌'];
+    const traps = ['🥒', '🍶', '🍜'];
+    const superFood = '🌈';
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playSound(freq, duration = 0.1) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function addDynamicText(x, y, text, color) {
+        dynamicTexts.push({ x, y, text, color, alpha: 1 });
+    }
+
+    function showResult() {
+        isPlaying = false;
+        bgm.pause(); // 게임 끝나면 음악 정지
+        bgm.currentTime = 0;
+        document.getElementById('finalScoreText').innerText = `최종 점수: ${score}점`;
+        let rank = ""; let comment = "";
+        if (score >= 1500) { rank = "🥇 전설의 꾸덕마스터"; comment = "와.. 님 요거트 장인임? 존경합니다."; }
+        else if (score >= 800) { rank = "🥈 제법 찰진 그릭러버"; comment = "이 정도면 한 끼 든든하네요!"; }
+        else { rank = "🥉 그냥 묽은 우유"; comment = "쌰갈!! 오이를 다 처먹으면 어떡해!!"; }
+        document.getElementById('rankText').innerText = `등급: ${rank}`;
+        document.getElementById('vibeComment').innerText = `"${comment}"`;
+        resultOverlay.style.display = 'flex';
+    }
+
+    function createItem() {
+        if (Math.random() < 0.03 * Math.min(gameSpeed, 2.5)) {
+            const x = Math.random() * (canvas.width - 50);
+            const rand = Math.random();
+            let type, isSuper = false, isTrap = false;
+            if (rand < 0.02 && superModeTimer <= 0) { type = superFood; isSuper = true; }
+            else if (rand > 0.85) { type = traps[Math.floor(Math.random() * traps.length)]; isTrap = true; }
+            else { type = toppings[Math.floor(Math.random() * toppings.length)]; }
+            items.push({ x, y: -50, type, isSuper, isTrap, size: isSuper ? 55 : 40 });
+        }
+    }
+
+    function update() {
+        if (!isPlaying) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        frameCount++;
+        gameSpeed = 1.0 + (frameCount / 3000);
+        if (superModeTimer > 0) superModeTimer--;
+        if (playerImg.complete) {
+            ctx.drawImage(playerImg, player.x, player.y, player.currentSize, player.currentSize);
+        } else {
+            ctx.font = `${player.currentSize * 0.8}px Arial`;
+            ctx.fillText('🍚', player.x + 20, player.y + 110);
+        }
+        if (player.currentSize > player.baseSize) player.currentSize -= 0.3;
+        if (superModeTimer > 0) {
+            ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 6;
+            ctx.strokeRect(player.x, player.y, player.currentSize, player.currentSize);
+        }
+        for (let i = items.length - 1; i >= 0; i--) {
+            let it = items[i];
+            it.y += 5 * gameSpeed;
+            if (superModeTimer > 0) {
+                it.x += ((player.x + player.currentSize/2) - it.x) * 0.12;
+                it.y += ((player.y + player.currentSize/2) - it.y) * 0.12;
+            }
+            ctx.font = `${it.size}px Arial`;
+            ctx.fillText(it.type, it.x, it.y);
+            if (it.y > player.y && it.y < player.y + player.currentSize &&
+                it.x > player.x - 10 && it.x < player.x + player.currentSize) {
+                if (it.isSuper) {
+                    superModeTimer = 300; score += 50;
+                    addDynamicText(player.x + 30, player.y, 'SUPER VIBE!', '#ffeb3b');
+                    playSound(600);
+                } else if (it.isTrap) {
+                    if (superModeTimer <= 0) {
+                        lives--; score = Math.max(0, score - 20);
+                        player.currentSize = player.baseSize;
+                        canvas.style.animation = 'shake 0.1s linear 3';
+                        setTimeout(() => canvas.style.animation = '', 300);
+                        addDynamicText(player.x + 30, player.y, '쌰갈!!', '#ff1744');
+                        playSound(150);
+                        if (lives <= 0) showResult();
+                    }
+                } else {
+                    score += 10; player.currentSize += 2;
+                    addDynamicText(player.x + 30, player.y, '꾸덕!', '#1a73e8');
+                    playSound(400);
+                }
+                items.splice(i, 1);
+            } else if (it.y > canvas.height) items.splice(i, 1);
+        }
+        for (let i = dynamicTexts.length - 1; i >= 0; i--) {
+            let dt = dynamicTexts[i];
+            dt.y -= 1.5; dt.alpha -= 0.02;
+            ctx.fillStyle = dt.color;
+            ctx.globalAlpha = dt.alpha;
+            ctx.font = 'bold 24px Arial';
+            ctx.fillText(dt.text, dt.x, dt.y);
+            ctx.globalAlpha = 1.0;
+            if (dt.alpha <= 0) dynamicTexts.splice(i, 1);
+        }
+        scoreEl.innerText = `Score: ${score}`;
+        livesEl.innerText = `Life: ${'🥣'.repeat(lives)}`;
+        createItem();
+        requestAnimationFrame(update);
+    }
+
+    window.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        let targetX = e.clientX - rect.left - player.currentSize/2;
+        player.x = Math.max(0, Math.min(canvas.width - player.currentSize, targetX));
+    });
+
+    startBtn.addEventListener('click', () => {
+        startBtn.style.display = 'none';
+        isPlaying = true;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        bgm.play().catch(e => console.log("음악 재생 실패:", e)); // 음악 재생
+        update();
+    });
+</script>
+</body>
+</html>
